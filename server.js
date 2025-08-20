@@ -1,5 +1,4 @@
 // server.js
-
 // 1. Import library yang dibutuhin
 require('dotenv').config();
 const fs = require('fs');
@@ -29,17 +28,25 @@ app.get('/', (req, res) => {
 //const WEBSITE_ID = process.env.WEBSITE_ID;
 
 // -----------------------------------------------------------------------------
-// CONTOH KONEKSI DATABASE (misalnya MongoDB)
-// Pastikan abang udah setup koneksi ke database-nya ya.
-// Kode di bawah ini cuma contoh, sesuaikan sama database abang.
-
-// GANTI SEMUA BAGIAN KONEKSI DB ABANG DENGAN INI
-const { MongoClient } = require('mongodb'); // <-- Hapus ServerApiVersion
+// KONEKSI DATABASE MONGODB
+const { MongoClient, ServerApiVersion } = require('mongodb');
 const uri = process.env.MONGO_URI;
 
-const mongoClient = new MongoClient(uri); // <-- Polosan tanpa opsi
-let db;
+// Konfigurasi koneksi MongoDB dengan opsi lengkap
+const mongoClient = new MongoClient(uri, {
+    tls: true,
+    tlsAllowInvalidCertificates: true, // Sementara untuk testing
+    connectTimeoutMS: 10000,
+    serverSelectionTimeoutMS: 5000,
+    maxPoolSize: 10,
+    serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+    }
+});
 
+let db;
 async function connectDB() {
     try {
         await mongoClient.connect();
@@ -52,35 +59,37 @@ async function connectDB() {
 }
 connectDB();
 
-// Anggap aja variabel 'db' sudah siap dipakai untuk query.
-// Untuk sekarang kita pake komen dulu ya bang.
+// Endpoint untuk testing koneksi MongoDB
+app.get('/test-mongo', async (req, res) => {
+  try {
+    await mongoClient.connect();
+    res.json({ status: 'MongoDB connected successfully!' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // -----------------------------------------------------------------------------
 
-
 // 3. API Endpoints
-
 /**
  * @route   GET /api/get-facebook-psid/:sessionId
  * @desc    Mengambil Facebook PSID dari Crisp menggunakan session_id
 */
-
 /*
 app.get('/api/get-facebook-psid/:sessionId', async (req, res) => {
     const { sessionId } = req.params;
     try {
         const sessionData = await crispClient.website.getSessionData(WEBSITE_ID, sessionId);
         const peopleId = sessionData.people_id;
-
         if (!peopleId) {
             return res.status(404).json({
                 success: false,
                 message: 'People ID tidak ditemukan di sesi ini.'
             });
         }
-
         const peopleData = await crispClient.website.getPeopleProfile(WEBSITE_ID, peopleId);
         const facebookPSID = peopleData.data.segments.find(segment => segment.startsWith('facebook:'))?.split(':')[1];
-
         if (facebookPSID) {
             res.json({
                 success: true,
@@ -100,8 +109,8 @@ app.get('/api/get-facebook-psid/:sessionId', async (req, res) => {
         });
     }
 });
-
 */
+
 /**
  * @route   GET /api/customer-status/:facebookPsid
  * @desc    Mengambil status customer terbaru beserta history-nya dari database
@@ -113,7 +122,6 @@ app.get('/api/customer-status/:facebookPsid', async (req, res) => {
         const customer = await db.collection('customer_statuses').findOne({
             facebook_psid: facebookPsid
         });
-
         if (customer) {
             res.json({
                 success: true,
@@ -146,11 +154,9 @@ app.get('/api/customer-status/:facebookPsid', async (req, res) => {
  */
 app.post('/api/customer-status', async (req, res) => {
     const { facebook_psid, status, session_id, agent_id } = req.body;
-
     if (!facebook_psid || !status) {
         return res.status(400).json({ success: false, message: 'facebook_psid dan status wajib diisi.' });
     }
-
     try {
         const currentDate = new Date();
         const historyEntry = {
@@ -180,10 +186,10 @@ app.post('/api/customer-status', async (req, res) => {
             },
             { upsert: true } // Ini kuncinya!
         );
-
+        
         // (Opsional) Broadcast update via WebSocket ke semua agen yang lagi online
         // broadcastStatusUpdate(facebook_psid, status);
-
+        
         res.json({
             success: true,
             message: 'Status berhasil diupdate',
@@ -209,20 +215,17 @@ app.post('/api/customer-status', async (req, res) => {
 app.get('/crisp-widget.js', (req, res) => {
     // Tentukan path ke file widget "cetakan" kita
     const widgetPath = path.join(__dirname, 'crisp-widget/crisp-status-widget.js');
-
     // Baca file widget sebagai teks
     fs.readFile(widgetPath, 'utf8', (err, data) => {
         if (err) {
             console.error("❌ Gagal membaca file widget:", err);
             return res.status(500).send('// Gagal memuat widget.');
         }
-
         // "Suntik" domain dari .env ke dalam placeholder
         const finalScript = data.replace(
             /__API_BASE_URL__/g, 
             process.env.API_BASE_URL
         );
-
         // Kirim hasilnya sebagai file Javascript
         res.type('.js');
         res.send(finalScript);
